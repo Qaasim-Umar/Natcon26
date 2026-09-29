@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { Html5Qrcode } from "html5-qrcode";
 
 type TicketRecord = {
@@ -81,6 +82,7 @@ export function AdminDashboard() {
   const [selected, setSelected] = useState<AdminAttendee | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const scannerCloseButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     try {
@@ -147,7 +149,13 @@ export function AdminDashboard() {
       scannerRef.current = scanner;
       await scanner.start(
         { facingMode: "environment" },
-        { fps: 10, qrbox: { width: 230, height: 230 } },
+        {
+          fps: 10,
+          qrbox: (viewfinderWidth, viewfinderHeight) => {
+            const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.72);
+            return { width: size, height: size };
+          }
+        },
         async (decodedText) => {
           resolveScan(decodedText);
           await scanner.stop().catch(() => undefined);
@@ -172,6 +180,22 @@ export function AdminDashboard() {
     setSelected(null);
     setScannerMessage("");
   };
+
+  useEffect(() => {
+    if (!scannerOpen) return;
+
+    document.body.classList.add("admin-scanner-open");
+    scannerCloseButtonRef.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") void closeScanner();
+    };
+    window.addEventListener("keydown", closeOnEscape);
+
+    return () => {
+      document.body.classList.remove("admin-scanner-open");
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [scannerOpen]);
 
   const checkIn = (record: AdminAttendee) => {
     if (record.paymentStatus !== "Paid" || record.checkedIn) return;
@@ -216,7 +240,7 @@ export function AdminDashboard() {
   };
 
   return (
-    <div className="admin-app">
+    <div className="admin-app" aria-hidden={scannerOpen ? "true" : undefined}>
       <aside className={`admin-sidebar${sidebarOpen ? " is-open" : ""}`}>
         <div className="admin-brand"><span>7</span><div><strong>NATCON</strong><small>Admin portal</small></div></div>
         <nav aria-label="Admin navigation">
@@ -255,7 +279,7 @@ export function AdminDashboard() {
         </section>
       </main>
 
-      {scannerOpen && <div className="scanner-modal" role="dialog" aria-modal="true" aria-labelledby="scanner-title"><div className="scanner-panel"><div className="scanner-header"><div><p>Door check-in</p><h2 id="scanner-title">Scan attendee ticket</h2></div><button type="button" onClick={closeScanner} aria-label="Close scanner">×</button></div>{!selected && <><div className={`scanner-viewport${scanning ? " is-scanning" : ""}`}><div id="admin-qr-reader" /><div className="scanner-placeholder"><Icon name="scan" /><strong>{scanning ? "Point the camera at the QR code" : "Ready to scan"}</strong><span>Hold the attendee&apos;s ticket inside the frame.</span></div></div>{scannerMessage && <p className="scanner-message" role="alert">{scannerMessage}</p>}<div className="scanner-actions">{scanning ? <button className="admin-secondary-button" type="button" onClick={stopScanner}>Stop camera</button> : <button className="admin-primary-button" type="button" onClick={startScanner}>Start camera</button>}<button className="admin-text-button" type="button" onClick={closeScanner}>Search attendee instead</button></div></>}{selected && <AttendeeResult attendee={selected} onCheckIn={() => checkIn(selected)} onConfirmPayment={(payment, checkInNow) => confirmPayment(selected, payment, checkInNow)} onScanAnother={() => { setSelected(null); setScannerMessage(""); }} />}</div></div>}
+      {scannerOpen && createPortal(<div className="scanner-modal" role="dialog" aria-modal="true" aria-labelledby="scanner-title"><div className="scanner-panel"><div className="scanner-header"><div><p>Door check-in</p><h2 id="scanner-title">Scan attendee ticket</h2></div><button ref={scannerCloseButtonRef} type="button" onClick={closeScanner} aria-label="Close scanner">×</button></div>{!selected && <><div className={`scanner-viewport${scanning ? " is-scanning" : ""}`}><div id="admin-qr-reader" /><div className="scanner-placeholder"><Icon name="scan" /><strong>{scanning ? "Point the camera at the QR code" : "Ready to scan"}</strong><span>Hold the attendee&apos;s ticket inside the frame.</span></div></div>{scannerMessage && <p className="scanner-message" role="alert">{scannerMessage}</p>}<div className="scanner-actions">{scanning ? <button className="admin-secondary-button" type="button" onClick={stopScanner}>Stop camera</button> : <button className="admin-primary-button" type="button" onClick={startScanner}>Start camera</button>}<button className="admin-text-button" type="button" onClick={closeScanner}>Search attendee instead</button></div></>}{selected && <AttendeeResult attendee={selected} onCheckIn={() => checkIn(selected)} onConfirmPayment={(payment, checkInNow) => confirmPayment(selected, payment, checkInNow)} onScanAnother={() => { setSelected(null); setScannerMessage(""); }} />}</div></div>, document.body)}
     </div>
   );
 }
