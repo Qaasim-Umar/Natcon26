@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import type { Html5Qrcode } from "html5-qrcode";
 
 import type { AdminAttendee, AdminProfile, PaymentMethod } from "@/lib/admin";
+import { formatAttendeeNumber } from "@/lib/registration";
 
 type PaymentConfirmation = {
   amountPaid: number;
@@ -74,7 +75,7 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
   }, []);
 
   const filtered = useMemo(() => attendees.filter((attendee) => {
-    const matchesQuery = `${attendee.fullName} ${attendee.email} ${attendee.phone} ${attendee.reference}`.toLowerCase().includes(query.toLowerCase());
+    const matchesQuery = `${attendee.fullName} ${attendee.email} ${attendee.phone} ${attendee.reference} ${formatAttendeeNumber(attendee.attendeeNumber)}`.toLowerCase().includes(query.toLowerCase());
     const matchesFilter = filter === "All"
       || (filter === "Checked in" && attendee.checkedIn)
       || (filter === "Not checked in" && !attendee.checkedIn && attendee.paymentStatus === "Paid")
@@ -86,8 +87,18 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
   const checkedIn = attendees.filter((attendee) => attendee.checkedIn).length;
   const pending = attendees.length - paid;
 
+  const referenceFromQr = (decodedText: string) => {
+    const value = decodedText.trim();
+    try {
+      const url = new URL(value);
+      const ticket = url.searchParams.get("ticket");
+      if (ticket) return ticket.trim();
+    } catch { /* Older tickets contain a plain reference rather than a URL. */ }
+    return value.startsWith("NATCON-2026:") ? value.slice("NATCON-2026:".length).trim() : value;
+  };
+
   const resolveScan = (decodedText: string) => {
-    const reference = decodedText.startsWith("NATCON-2026:") ? decodedText.slice("NATCON-2026:".length) : decodedText;
+    const reference = referenceFromQr(decodedText);
     const match = attendees.find((attendee) => attendee.reference === reference.trim());
     if (!match) {
       setSelected(null);
@@ -97,6 +108,17 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
     setSelected(match);
     setScannerMessage("");
   };
+
+  useEffect(() => {
+    if (loading || !attendees.length) return;
+    const url = new URL(window.location.href);
+    const ticket = url.searchParams.get("ticket");
+    if (!ticket) return;
+    resolveScan(ticket);
+    setScannerOpen(true);
+    url.searchParams.delete("ticket");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [attendees, loading]);
 
   const startScanner = async () => {
     setScannerMessage("");
@@ -241,11 +263,11 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
         </section>
 
         <section id="attendees" className="admin-table-card">
-          <div className="admin-table-head"><div><h2>Attendees</h2><p>Search registrations and manage entry.</p></div><div className="admin-search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email or ticket" aria-label="Search attendees" /></div></div>
+          <div className="admin-table-head"><div><h2>Attendees</h2><p>Search registrations and manage entry.</p></div><div className="admin-search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email or attendee ID" aria-label="Search attendees" /></div></div>
           <div className="admin-filters" role="group" aria-label="Filter attendees">{(["All", "Checked in", "Not checked in", "Pending"] as const).map((item) => <button className={filter === item ? "active" : ""} type="button" key={item} onClick={() => setFilter(item)}>{item}</button>)}</div>
           {dataError && <p className="admin-data-error" role="alert">{dataError} <button type="button" onClick={() => void loadAttendees()}>Try again</button></p>}
           <div className="admin-table-wrap">
-            <table><thead><tr><th>Attendee</th><th>Ticket reference</th><th>Category</th><th>Payment</th><th>Payment recorded by</th><th>Check-in</th><th><span className="sr-only">Action</span></th></tr></thead><tbody>{filtered.map((attendee) => <tr key={attendee.reference}><td><div className="attendee-cell"><span>{initials(attendee.fullName)}</span><div><strong>{attendee.fullName}</strong><small>{attendee.email}</small></div></div></td><td><code>{attendee.reference}</code></td><td>{attendee.category}</td><td><Status tone={attendee.paymentStatus === "Paid" ? "success" : "warning"}>{attendee.paymentStatus}</Status></td><td>{attendee.paymentConfirmedBy ? <div className="payment-audit-cell"><strong>{attendee.paymentConfirmedBy}</strong><small>{attendee.paymentMethod} · {attendee.paymentConfirmedAt}</small></div> : <span className="not-checked">{attendee.paymentStatus === "Paid" ? "Pre-event payment" : "Not recorded"}</span>}</td><td>{attendee.checkedIn ? <div className="payment-audit-cell"><strong>{attendee.checkedInBy || "Recorded"}</strong><small>{attendee.checkedInAt}</small></div> : <span className="not-checked">Not checked in</span>}</td><td><button className="view-attendee" type="button" onClick={() => { setSelected(attendee); setScannerOpen(true); }}>View</button></td></tr>)}</tbody></table>
+            <table><thead><tr><th>Attendee</th><th>Attendee ID</th><th>Category</th><th>Payment</th><th>Payment recorded by</th><th>Check-in</th><th><span className="sr-only">Action</span></th></tr></thead><tbody>{filtered.map((attendee) => <tr key={attendee.reference}><td><div className="attendee-cell"><span>{initials(attendee.fullName)}</span><div><strong>{attendee.fullName}</strong><small>{attendee.email}</small></div></div></td><td><code>{formatAttendeeNumber(attendee.attendeeNumber)}</code></td><td>{attendee.category}</td><td><Status tone={attendee.paymentStatus === "Paid" ? "success" : "warning"}>{attendee.paymentStatus}</Status></td><td>{attendee.paymentConfirmedBy ? <div className="payment-audit-cell"><strong>{attendee.paymentConfirmedBy}</strong><small>{attendee.paymentMethod} · {attendee.paymentConfirmedAt}</small></div> : <span className="not-checked">{attendee.paymentStatus === "Paid" ? "Pre-event payment" : "Not recorded"}</span>}</td><td>{attendee.checkedIn ? <div className="payment-audit-cell"><strong>{attendee.checkedInBy || "Recorded"}</strong><small>{attendee.checkedInAt}</small></div> : <span className="not-checked">Not checked in</span>}</td><td><button className="view-attendee" type="button" onClick={() => { setSelected(attendee); setScannerOpen(true); }}>View</button></td></tr>)}</tbody></table>
             {loading ? <div className="admin-empty">Loading attendees…</div> : !filtered.length && <div className="admin-empty">No attendees match this search.</div>}
           </div>
         </section>
@@ -295,7 +317,7 @@ function AttendeeResult({ attendee, canTakePayments, canCheckIn, busy, actionErr
     <div className={`scan-result-icon ${attendee.checkedIn ? "done" : attendee.paymentStatus === "Paid" ? "ready" : "pending"}`}><Icon name={attendee.checkedIn ? "check" : "ticket"} /></div>
     <p className="scan-result-label">Attendee found</p>
     <h3>{attendee.fullName}</h3>
-    <span className="scan-reference">{attendee.reference}</span>
+    <span className="scan-reference">Attendee ID {formatAttendeeNumber(attendee.attendeeNumber)}</span>
     <dl>
       <div><dt>Email</dt><dd>{attendee.email}</dd></div><div><dt>Phone</dt><dd>{attendee.phone}</dd></div>
       <div><dt>Gender</dt><dd>{attendee.gender}</dd></div><div><dt>Category</dt><dd>{attendee.category}</dd></div>

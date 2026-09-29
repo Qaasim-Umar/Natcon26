@@ -54,3 +54,11 @@ Available roles are:
 Create a separate Auth user and profile row for each event worker. The dashboard records which worker confirmed each payment and check-in.
 
 After restarting the app, visit `/admin` and sign in with the assigned admin account.
+
+## 6. Add sequential attendee IDs and scannable ticket links
+
+Run this migration after the registration and admin migrations:
+
+`supabase/migrations/20260929175525_attendee_numbers_qr_links.sql`
+
+It assigns every existing and future attendee a unique sequential number (`001`, `002`, `003`, and so on). Ticket QR codes use a normal HTTPS admin lookup link, so phone camera apps recognize them and signed-in admins can open the attendee record directly.

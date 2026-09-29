@@ -3,6 +3,7 @@ export type PaymentMethod = "Bank transfer" | "POS" | "Cash";
 
 export type AdminAttendee = {
   id: string;
+  attendeeNumber: number;
   fullName: string;
   email: string;
   phone: string;
@@ -29,7 +30,7 @@ export type AdminProfile = {
 };
 
 export const ADMIN_ATTENDEE_SELECT = `
-  id, full_name, email, phone, gender, category, institution, state, ticket_reference,
+  id, attendee_number, full_name, email, phone, gender, category, institution, state, ticket_reference,
   payment_status, amount_paid, payment_method, payment_reference, payment_confirmed_at, checked_in_at,
   payment_admin:admin_profiles!attendees_payment_confirmed_by_fkey(full_name),
   checkin_admin:admin_profiles!attendees_checked_in_by_fkey(full_name)
@@ -37,6 +38,7 @@ export const ADMIN_ATTENDEE_SELECT = `
 
 type AttendeeRow = {
   id: string;
+  attendee_number: number;
   full_name: string;
   email: string;
   phone: string;
@@ -78,6 +80,7 @@ const formatTimestamp = (value: string | null) => value
 export function mapAdminAttendee(row: AttendeeRow): AdminAttendee {
   return {
     id: row.id,
+    attendeeNumber: row.attendee_number,
     fullName: row.full_name,
     email: row.email,
     phone: row.phone,

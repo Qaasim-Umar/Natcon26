@@ -6,11 +6,12 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const ticketColumns = "registration_id, full_name, email, phone, gender, category, institution, state, ticket_reference, position";
+const ticketColumns = "registration_id, attendee_number, full_name, email, phone, gender, category, institution, state, ticket_reference, position";
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 type TicketRow = {
   registration_id: string;
+  attendee_number: number;
   full_name: string;
   email: string;
   phone: string;
@@ -23,6 +24,7 @@ type TicketRow = {
 };
 
 const toTicket = (row: TicketRow): RegistrationTicket => ({
+  attendeeNumber: row.attendee_number,
   fullName: row.full_name,
   email: row.email,
   phone: row.phone,

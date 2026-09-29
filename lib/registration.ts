@@ -12,8 +12,12 @@ export type RegistrationAttendee = {
 };
 
 export type RegistrationTicket = RegistrationAttendee & {
+  attendeeNumber: number;
   reference: string;
 };
+
+export const formatAttendeeNumber = (value: number) =>
+  Number.isFinite(value) && value > 0 ? String(value).padStart(3, "0") : "---";
 
 const allowedGenders = new Set(["female", "male", "prefer-not-to-say"]);
 const allowedCategories = new Set(["school-leaver", "undergraduate", "postgraduate", "other"]);

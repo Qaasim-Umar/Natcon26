@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 
-import type { RegistrationTicket } from "@/lib/registration";
+import { formatAttendeeNumber, type RegistrationTicket } from "@/lib/registration";
 
 const PRICE_PER_ATTENDEE = 8000;
 const MAX_ATTENDEES = 10;
@@ -76,8 +76,11 @@ function MockQr({ seed }: { seed: string }) {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    QRCode.toCanvas(canvas, `NATCON-2026:${seed}`, {
-      width: 116,
+    const ticketUrl = new URL("/admin", window.location.origin);
+    ticketUrl.searchParams.set("ticket", seed);
+
+    QRCode.toCanvas(canvas, ticketUrl.toString(), {
+      width: 192,
       margin: 1,
       errorCorrectionLevel: "M",
       color: { dark: "#07154f", light: "#ffffff" }
@@ -92,11 +95,12 @@ function MockQr({ seed }: { seed: string }) {
     });
   }, [seed]);
 
-  return <canvas ref={canvasRef} width="116" height="116" role="img" aria-label="Ticket QR code" />;
+  return <canvas ref={canvasRef} width="192" height="192" role="img" aria-label="Ticket QR code that opens the admin attendee lookup" />;
 }
 
 function Ticket({ ticket }: { ticket: StoredTicket }) {
   const initials = ticket.fullName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+  const attendeeId = formatAttendeeNumber(ticket.attendeeNumber);
   const ticketRef = useRef<HTMLElement>(null);
 
   const downloadTicket = () => {
@@ -179,7 +183,7 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
     context.fillText("ATTENDEE ID", 52, 556);
     context.fillStyle = "#0b2472";
     context.font = "800 22px Arial";
-    context.fillText(ticket.reference, 52, 590);
+    context.fillText(attendeeId, 52, 590);
 
     roundedBox(108, 628, 504, 344, 28, "#07154f");
     context.fillStyle = "#9fd7f6";
@@ -194,7 +198,7 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
     context.fillRect(0, 1008, 720, 72);
     context.fillStyle = "#ffffff";
     context.font = "800 17px Arial";
-    context.fillText(ticket.reference, 360, 1042);
+    context.fillText(`ATTENDEE ${attendeeId}`, 360, 1042);
     context.font = "700 12px Arial";
     context.fillStyle = "rgba(255,255,255,.68)";
     context.fillText("PRESENT THIS PASS AT THE ENTRANCE", 360, 1064);
@@ -228,12 +232,12 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
           <div><span>Date</span><strong>1–4 Oct 2026</strong></div>
           <div><span>Venue</span><strong>Iwo, Osun</strong></div>
         </div>
-        <div className="ticket-attendee-id"><span>Attendee ID</span><strong>{ticket.reference}</strong></div>
+        <div className="ticket-attendee-id"><span>Attendee ID</span><strong>{attendeeId}</strong></div>
       </div>
       <div className="ticket-code">
         <span className="ticket-scan-label">Scan for entry</span>
         <MockQr seed={ticket.reference} />
-        <strong>{ticket.reference}</strong>
+        <strong>Attendee {attendeeId}</strong>
         <span>Present at entrance</span>
       </div>
     </article>
