@@ -80,7 +80,7 @@ function MockQr({ seed }: { seed: string }) {
     ticketUrl.searchParams.set("ticket", seed);
 
     QRCode.toCanvas(canvas, ticketUrl.toString(), {
-      width: 192,
+      width: 320,
       margin: 1,
       errorCorrectionLevel: "M",
       color: { dark: "#07154f", light: "#ffffff" }
@@ -441,7 +441,7 @@ export function EventRegistration() {
               </div>
               <div className="checkout-card">
                 <div className="checkout-total"><span>Total registration fee</span><strong>{formatNaira(total)}</strong><small>{attendees.length} {attendees.length === 1 ? "attendee" : "attendees"} × {formatNaira(PRICE_PER_ATTENDEE)}</small></div>
-                <button className="button button-primary button-submit" type="submit">Review registration <ArrowIcon /></button>
+                <button className="button button-primary button-submit" type="submit">Continue registration <ArrowIcon /></button>
               </div>
             </form>
           </div>

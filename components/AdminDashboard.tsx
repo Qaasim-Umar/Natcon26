@@ -43,6 +43,7 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
   const [actionLoading, setActionLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
+  const scannerHintTimerRef = useRef<number | null>(null);
   const scannerCloseButtonRef = useRef<HTMLButtonElement>(null);
 
   const loadAttendees = async (quiet = false) => {
@@ -71,6 +72,7 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
   }, []);
 
   useEffect(() => () => {
+    if (scannerHintTimerRef.current) window.clearTimeout(scannerHintTimerRef.current);
     scannerRef.current?.stop().catch(() => undefined);
   }, []);
 
@@ -121,37 +123,57 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
   }, [attendees, loading]);
 
   const startScanner = async () => {
+    if (scannerHintTimerRef.current) window.clearTimeout(scannerHintTimerRef.current);
     setScannerMessage("");
     setSelected(null);
     setScanning(true);
     try {
-      const { Html5Qrcode } = await import("html5-qrcode");
-      const scanner = new Html5Qrcode("admin-qr-reader");
+      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
+      const scanner = new Html5Qrcode("admin-qr-reader", {
+        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
+        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+        verbose: false
+      });
       scannerRef.current = scanner;
       await scanner.start(
-        { facingMode: "environment" },
         {
-          fps: 10,
-          qrbox: (viewfinderWidth, viewfinderHeight) => {
-            const size = Math.floor(Math.min(viewfinderWidth, viewfinderHeight) * 0.72);
-            return { width: size, height: size };
-          }
+          facingMode: { ideal: "environment" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        {
+          fps: 15,
+          disableFlip: false
         },
         async (decodedText) => {
+          if (scannerHintTimerRef.current) window.clearTimeout(scannerHintTimerRef.current);
           resolveScan(decodedText);
           await scanner.stop().catch(() => undefined);
+          scannerRef.current = null;
           setScanning(false);
         },
         () => undefined
       );
-    } catch {
-      setScannerMessage("Camera access was unavailable. Search by name or ticket reference instead.");
+      scannerHintTimerRef.current = window.setTimeout(() => {
+        if (scannerRef.current !== scanner || !scanner.isScanning) return;
+        setScannerMessage("No QR code detected yet. Fill most of the camera view with the square QR code, hold the phone steady, and avoid glare.");
+      }, 7000);
+    } catch (error) {
+      scannerRef.current = null;
+      setScannerMessage(error instanceof Error
+        ? `The scanner could not start: ${error.message}`
+        : "The scanner could not start. Search by name or attendee ID instead.");
       setScanning(false);
     }
   };
 
   const stopScanner = async () => {
+    if (scannerHintTimerRef.current) {
+      window.clearTimeout(scannerHintTimerRef.current);
+      scannerHintTimerRef.current = null;
+    }
     await scannerRef.current?.stop().catch(() => undefined);
+    scannerRef.current = null;
     setScanning(false);
   };
 
