@@ -4,55 +4,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Html5Qrcode } from "html5-qrcode";
 
-type TicketRecord = {
-  fullName: string;
-  email: string;
-  phone: string;
-  gender: string;
-  category: string;
-  institution: string;
-  state: string;
-  reference: string;
-};
-
-type AdminAttendee = TicketRecord & {
-  paymentStatus: "Paid" | "Pending";
-  amountPaid?: number;
-  paymentMethod?: PaymentMethod;
-  paymentReference?: string;
-  paymentConfirmedAt?: string;
-  paymentConfirmedBy?: string;
-  checkedIn: boolean;
-  checkedInAt?: string;
-};
-
-type PaymentMethod = "Bank transfer" | "POS" | "Cash";
+import type { AdminAttendee, AdminProfile, PaymentMethod } from "@/lib/admin";
 
 type PaymentConfirmation = {
   amountPaid: number;
   paymentMethod: PaymentMethod;
   paymentReference: string;
-  paymentConfirmedAt: string;
-  paymentConfirmedBy: string;
 };
 
 const REGISTRATION_FEE = 8000;
-const CURRENT_ADMIN = "Admin Officer";
-
-const SEED_ATTENDEES: AdminAttendee[] = [
-  { fullName: "Aisha Bello", email: "aisha@example.com", phone: "0800 000 0000", gender: "Female", category: "Undergraduate", institution: "University of Ibadan", state: "Oyo", reference: "NAT26-001-8815", paymentStatus: "Paid", checkedIn: false },
-  { fullName: "Musa Kareem", email: "musa@example.com", phone: "0811 111 1111", gender: "Male", category: "Postgraduate student", institution: "Obafemi Awolowo University", state: "Osun", reference: "NAT26-002-6942", paymentStatus: "Paid", checkedIn: true, checkedInAt: "08:42" },
-  { fullName: "Maryam Lawal", email: "maryam@example.com", phone: "0702 331 9120", gender: "Female", category: "Secondary school leaver", institution: "Al-Hikmah College", state: "Kwara", reference: "NAT26-003-4271", paymentStatus: "Paid", checkedIn: false },
-  { fullName: "Ibrahim Sani", email: "ibrahim@example.com", phone: "0906 803 4421", gender: "Male", category: "Undergraduate", institution: "Ahmadu Bello University", state: "Kaduna", reference: "NAT26-004-3108", paymentStatus: "Pending", checkedIn: false },
-  { fullName: "Zainab Adeyemi", email: "zainab@example.com", phone: "0814 925 7704", gender: "Female", category: "Undergraduate", institution: "University of Lagos", state: "Lagos", reference: "NAT26-005-5290", paymentStatus: "Paid", checkedIn: true, checkedInAt: "09:07" }
-];
-
-const categoryLabel = (value: string) => ({
-  "school-leaver": "Secondary school leaver",
-  undergraduate: "Undergraduate",
-  postgraduate: "Postgraduate student",
-  other: "Other"
-}[value] ?? value);
 
 function Icon({ name }: { name: "grid" | "scan" | "users" | "search" | "check" | "clock" | "ticket" | "menu" }) {
   const paths = {
@@ -68,46 +28,45 @@ function Icon({ name }: { name: "grid" | "scan" | "users" | "search" | "check" |
   return <svg viewBox="0 0 24 24" aria-hidden="true">{paths[name]}</svg>;
 }
 
-function adminReference(record: TicketRecord): AdminAttendee {
-  return { ...record, category: categoryLabel(record.category), paymentStatus: "Paid", checkedIn: false };
-}
-
-export function AdminDashboard() {
-  const [attendees, setAttendees] = useState<AdminAttendee[]>(SEED_ATTENDEES);
+export function AdminDashboard({ admin }: { admin: AdminProfile }) {
+  const [attendees, setAttendees] = useState<AdminAttendee[]>([]);
+  const [dataError, setDataError] = useState("");
+  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"All" | "Checked in" | "Not checked in" | "Pending">("All");
   const [scannerOpen, setScannerOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scannerMessage, setScannerMessage] = useState("");
   const [selected, setSelected] = useState<AdminAttendee | null>(null);
+  const [actionError, setActionError] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const scannerRef = useRef<Html5Qrcode | null>(null);
   const scannerCloseButtonRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
+  const loadAttendees = async (quiet = false) => {
+    if (!quiet) setLoading(true);
     try {
-      const registrations = JSON.parse(sessionStorage.getItem("natconTickets") || "[]") as TicketRecord[];
-      const storedCheckins = JSON.parse(sessionStorage.getItem("natconCheckins") || "{}") as Record<string, string>;
-      const storedPayments = JSON.parse(sessionStorage.getItem("natconPayments") || "{}") as Record<string, PaymentConfirmation>;
-      setAttendees((current) => {
-        const byReference = new Map(current.map((attendee) => {
-          const payment = storedPayments[attendee.reference];
-          return [attendee.reference, {
-            ...attendee,
-            ...(payment ? { ...payment, paymentStatus: "Paid" as const } : {}),
-            checkedIn: attendee.checkedIn || Boolean(storedCheckins[attendee.reference]),
-            checkedInAt: storedCheckins[attendee.reference] || attendee.checkedInAt
-          }];
-        }));
-        registrations.forEach((record) => byReference.set(record.reference, {
-          ...adminReference(record),
-          ...(storedPayments[record.reference] ? { ...storedPayments[record.reference], paymentStatus: "Paid" as const } : {}),
-          checkedIn: Boolean(storedCheckins[record.reference]),
-          checkedInAt: storedCheckins[record.reference]
-        }));
-        return [...byReference.values()];
-      });
-    } catch { /* Session data is optional. */ }
+      const response = await fetch("/api/admin/attendees", { cache: "no-store" });
+      const result = await response.json() as { attendees?: AdminAttendee[]; error?: string };
+      if (response.status === 401) { window.location.reload(); return; }
+      if (!response.ok || !result.attendees) throw new Error(result.error || "Attendees could not be loaded.");
+      setAttendees(result.attendees);
+      setSelected((current) => current
+        ? result.attendees?.find((attendee) => attendee.id === current.id) ?? current
+        : null);
+      setDataError("");
+    } catch (error) {
+      setDataError(error instanceof Error ? error.message : "Attendees could not be loaded.");
+    } finally {
+      if (!quiet) setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadAttendees();
+    const interval = window.setInterval(() => void loadAttendees(true), 15_000);
+    return () => window.clearInterval(interval);
   }, []);
 
   useEffect(() => () => {
@@ -197,40 +156,52 @@ export function AdminDashboard() {
     };
   }, [scannerOpen]);
 
-  const checkIn = (record: AdminAttendee) => {
-    if (record.paymentStatus !== "Paid" || record.checkedIn) return;
-    const time = new Intl.DateTimeFormat("en-NG", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date());
-    setAttendees((current) => current.map((attendee) => attendee.reference === record.reference ? { ...attendee, checkedIn: true, checkedInAt: time } : attendee));
-    setSelected({ ...record, checkedIn: true, checkedInAt: time });
-    try {
-      const stored = JSON.parse(sessionStorage.getItem("natconCheckins") || "{}") as Record<string, string>;
-      sessionStorage.setItem("natconCheckins", JSON.stringify({ ...stored, [record.reference]: time }));
-    } catch { /* Check-in persistence is optional. */ }
+  const runAttendeeAction = async (record: AdminAttendee, body: object) => {
+    const response = await fetch(`/api/admin/attendees/${record.id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    const result = await response.json() as { attendee?: AdminAttendee; error?: string };
+    if (response.status === 401) { window.location.reload(); throw new Error("Your session has expired."); }
+    if (!response.ok || !result.attendee) throw new Error(result.error || "The attendee could not be updated.");
+    setAttendees((current) => current.map((attendee) => attendee.id === result.attendee?.id ? result.attendee : attendee));
+    setSelected(result.attendee);
+    return result.attendee;
   };
 
-  const confirmPayment = (record: AdminAttendee, payment: PaymentConfirmation, checkInNow: boolean) => {
-    const checkInTime = checkInNow
-      ? new Intl.DateTimeFormat("en-NG", { hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date())
-      : undefined;
-    const updated: AdminAttendee = {
-      ...record,
-      ...payment,
-      paymentStatus: "Paid",
-      checkedIn: checkInNow || record.checkedIn,
-      checkedInAt: checkInTime || record.checkedInAt
-    };
-
-    setAttendees((current) => current.map((attendee) => attendee.reference === record.reference ? updated : attendee));
-    setSelected(updated);
-
+  const checkIn = async (record: AdminAttendee) => {
+    if (record.paymentStatus !== "Paid" || record.checkedIn || actionLoading) return;
+    setActionLoading(true);
+    setActionError("");
     try {
-      const payments = JSON.parse(sessionStorage.getItem("natconPayments") || "{}") as Record<string, PaymentConfirmation>;
-      sessionStorage.setItem("natconPayments", JSON.stringify({ ...payments, [record.reference]: payment }));
-      if (checkInTime) {
-        const checkins = JSON.parse(sessionStorage.getItem("natconCheckins") || "{}") as Record<string, string>;
-        sessionStorage.setItem("natconCheckins", JSON.stringify({ ...checkins, [record.reference]: checkInTime }));
-      }
-    } catch { /* Event-day demo persistence is optional. */ }
+      await runAttendeeAction(record, { action: "check-in" });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Check-in failed.");
+      await loadAttendees(true);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const confirmPayment = async (record: AdminAttendee, payment: PaymentConfirmation, checkInNow: boolean) => {
+    if (actionLoading) return;
+    setActionLoading(true);
+    setActionError("");
+    try {
+      const paidAttendee = await runAttendeeAction(record, { action: "payment", ...payment });
+      if (checkInNow) await runAttendeeAction(paidAttendee, { action: "check-in" });
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Payment confirmation failed.");
+      await loadAttendees(true);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const signOut = async () => {
+    await fetch("/api/admin/auth", { method: "DELETE" });
+    window.location.reload();
   };
 
   const openPaymentDesk = () => {
@@ -255,8 +226,8 @@ export function AdminDashboard() {
       <main className="admin-main">
         <header className="admin-header">
           <button className="admin-menu" type="button" aria-label="Open navigation" onClick={() => setSidebarOpen((open) => !open)}><Icon name="menu" /></button>
-          <div><p>Event operations</p><h1>Good morning, Admin.</h1></div>
-          <div className="admin-profile"><span>AO</span><div><strong>Admin Officer</strong><small>Check-in team</small></div></div>
+          <div><p>Event operations</p><h1>Welcome, {admin.fullName.split(" ")[0]}.</h1></div>
+          <div className="admin-profile"><span>{initials(admin.fullName)}</span><div><strong>{admin.fullName}</strong><small>{roleLabel(admin.role)}</small></div><button type="button" onClick={signOut}>Sign out</button></div>
         </header>
 
         <section id="overview" className="admin-overview">
@@ -272,14 +243,15 @@ export function AdminDashboard() {
         <section id="attendees" className="admin-table-card">
           <div className="admin-table-head"><div><h2>Attendees</h2><p>Search registrations and manage entry.</p></div><div className="admin-search"><Icon name="search" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search name, email or ticket" aria-label="Search attendees" /></div></div>
           <div className="admin-filters" role="group" aria-label="Filter attendees">{(["All", "Checked in", "Not checked in", "Pending"] as const).map((item) => <button className={filter === item ? "active" : ""} type="button" key={item} onClick={() => setFilter(item)}>{item}</button>)}</div>
+          {dataError && <p className="admin-data-error" role="alert">{dataError} <button type="button" onClick={() => void loadAttendees()}>Try again</button></p>}
           <div className="admin-table-wrap">
-            <table><thead><tr><th>Attendee</th><th>Ticket reference</th><th>Category</th><th>Payment</th><th>Payment recorded by</th><th>Check-in</th><th><span className="sr-only">Action</span></th></tr></thead><tbody>{filtered.map((attendee) => <tr key={attendee.reference}><td><div className="attendee-cell"><span>{initials(attendee.fullName)}</span><div><strong>{attendee.fullName}</strong><small>{attendee.email}</small></div></div></td><td><code>{attendee.reference}</code></td><td>{attendee.category}</td><td><Status tone={attendee.paymentStatus === "Paid" ? "success" : "warning"}>{attendee.paymentStatus}</Status></td><td>{attendee.paymentConfirmedBy ? <div className="payment-audit-cell"><strong>{attendee.paymentConfirmedBy}</strong><small>{attendee.paymentMethod} · {attendee.paymentConfirmedAt}</small></div> : <span className="not-checked">{attendee.paymentStatus === "Paid" ? "Pre-event payment" : "Not recorded"}</span>}</td><td>{attendee.checkedIn ? <Status tone="info">Checked in {attendee.checkedInAt}</Status> : <span className="not-checked">Not checked in</span>}</td><td><button className="view-attendee" type="button" onClick={() => { setSelected(attendee); setScannerOpen(true); }}>View</button></td></tr>)}</tbody></table>
-            {!filtered.length && <div className="admin-empty">No attendees match this search.</div>}
+            <table><thead><tr><th>Attendee</th><th>Ticket reference</th><th>Category</th><th>Payment</th><th>Payment recorded by</th><th>Check-in</th><th><span className="sr-only">Action</span></th></tr></thead><tbody>{filtered.map((attendee) => <tr key={attendee.reference}><td><div className="attendee-cell"><span>{initials(attendee.fullName)}</span><div><strong>{attendee.fullName}</strong><small>{attendee.email}</small></div></div></td><td><code>{attendee.reference}</code></td><td>{attendee.category}</td><td><Status tone={attendee.paymentStatus === "Paid" ? "success" : "warning"}>{attendee.paymentStatus}</Status></td><td>{attendee.paymentConfirmedBy ? <div className="payment-audit-cell"><strong>{attendee.paymentConfirmedBy}</strong><small>{attendee.paymentMethod} · {attendee.paymentConfirmedAt}</small></div> : <span className="not-checked">{attendee.paymentStatus === "Paid" ? "Pre-event payment" : "Not recorded"}</span>}</td><td>{attendee.checkedIn ? <div className="payment-audit-cell"><strong>{attendee.checkedInBy || "Recorded"}</strong><small>{attendee.checkedInAt}</small></div> : <span className="not-checked">Not checked in</span>}</td><td><button className="view-attendee" type="button" onClick={() => { setSelected(attendee); setScannerOpen(true); }}>View</button></td></tr>)}</tbody></table>
+            {loading ? <div className="admin-empty">Loading attendees…</div> : !filtered.length && <div className="admin-empty">No attendees match this search.</div>}
           </div>
         </section>
       </main>
 
-      {scannerOpen && createPortal(<div className="scanner-modal" role="dialog" aria-modal="true" aria-labelledby="scanner-title"><div className="scanner-panel"><div className="scanner-header"><div><p>Door check-in</p><h2 id="scanner-title">Scan attendee ticket</h2></div><button ref={scannerCloseButtonRef} type="button" onClick={closeScanner} aria-label="Close scanner">×</button></div>{!selected && <><div className={`scanner-viewport${scanning ? " is-scanning" : ""}`}><div id="admin-qr-reader" /><div className="scanner-placeholder"><Icon name="scan" /><strong>{scanning ? "Point the camera at the QR code" : "Ready to scan"}</strong><span>Hold the attendee&apos;s ticket inside the frame.</span></div></div>{scannerMessage && <p className="scanner-message" role="alert">{scannerMessage}</p>}<div className="scanner-actions">{scanning ? <button className="admin-secondary-button" type="button" onClick={stopScanner}>Stop camera</button> : <button className="admin-primary-button" type="button" onClick={startScanner}>Start camera</button>}<button className="admin-text-button" type="button" onClick={closeScanner}>Search attendee instead</button></div></>}{selected && <AttendeeResult attendee={selected} onCheckIn={() => checkIn(selected)} onConfirmPayment={(payment, checkInNow) => confirmPayment(selected, payment, checkInNow)} onScanAnother={() => { setSelected(null); setScannerMessage(""); }} />}</div></div>, document.body)}
+      {scannerOpen && createPortal(<div className="scanner-modal" role="dialog" aria-modal="true" aria-labelledby="scanner-title"><div className="scanner-panel"><div className="scanner-header"><div><p>Door check-in</p><h2 id="scanner-title">Scan attendee ticket</h2></div><button ref={scannerCloseButtonRef} type="button" onClick={closeScanner} aria-label="Close scanner">×</button></div>{!selected && <><div className={`scanner-viewport${scanning ? " is-scanning" : ""}`}><div id="admin-qr-reader" /><div className="scanner-placeholder"><Icon name="scan" /><strong>{scanning ? "Point the camera at the QR code" : "Ready to scan"}</strong><span>Hold the attendee&apos;s ticket inside the frame.</span></div></div>{scannerMessage && <p className="scanner-message" role="alert">{scannerMessage}</p>}<div className="scanner-actions">{scanning ? <button className="admin-secondary-button" type="button" onClick={stopScanner}>Stop camera</button> : <button className="admin-primary-button" type="button" onClick={startScanner}>Start camera</button>}<button className="admin-text-button" type="button" onClick={closeScanner}>Search attendee instead</button></div></>}{selected && <AttendeeResult attendee={selected} canTakePayments={admin.role === "admin" || admin.role === "payment"} canCheckIn={admin.role === "admin" || admin.role === "check_in"} busy={actionLoading} actionError={actionError} onCheckIn={() => void checkIn(selected)} onConfirmPayment={(payment, checkInNow) => void confirmPayment(selected, payment, checkInNow)} onScanAnother={() => { setSelected(null); setScannerMessage(""); setActionError(""); }} />}</div></div>, document.body)}
     </div>
   );
 }
@@ -288,8 +260,12 @@ function Status({ tone, children }: { tone: "success" | "warning" | "info"; chil
   return <span className={`admin-status ${tone}`}>{children}</span>;
 }
 
-function AttendeeResult({ attendee, onCheckIn, onConfirmPayment, onScanAnother }: {
+function AttendeeResult({ attendee, canTakePayments, canCheckIn, busy, actionError, onCheckIn, onConfirmPayment, onScanAnother }: {
   attendee: AdminAttendee;
+  canTakePayments: boolean;
+  canCheckIn: boolean;
+  busy: boolean;
+  actionError: string;
   onCheckIn: () => void;
   onConfirmPayment: (payment: PaymentConfirmation, checkInNow: boolean) => void;
   onScanAnother: () => void;
@@ -308,22 +284,11 @@ function AttendeeResult({ attendee, onCheckIn, onConfirmPayment, onScanAnother }
       return;
     }
 
-    const confirmedAt = new Intl.DateTimeFormat("en-NG", {
-      day: "2-digit",
-      month: "short",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false
-    }).format(new Date());
-
     onConfirmPayment({
       amountPaid: REGISTRATION_FEE,
       paymentMethod: method,
-      paymentReference: cleanedReference || `CASH-${attendee.reference}`,
-      paymentConfirmedAt: confirmedAt,
-      paymentConfirmedBy: CURRENT_ADMIN
-    }, checkInNow);
-    setPaymentFormOpen(false);
+      paymentReference: cleanedReference || `CASH-${attendee.reference}`
+    }, checkInNow && canCheckIn);
   };
 
   return <div className="scan-result">
@@ -338,22 +303,26 @@ function AttendeeResult({ attendee, onCheckIn, onConfirmPayment, onScanAnother }
     </dl>
     <div className="scan-status-row">
       <span>Payment <Status tone={attendee.paymentStatus === "Paid" ? "success" : "warning"}>{attendee.paymentStatus}</Status></span>
-      <span>Check-in {attendee.checkedIn ? <Status tone="info">Completed at {attendee.checkedInAt}</Status> : <span className="not-checked">Not checked in</span>}</span>
+      <span>Check-in {attendee.checkedIn ? <Status tone="info">{attendee.checkedInBy ? `${attendee.checkedInBy} · ` : ""}{attendee.checkedInAt}</Status> : <span className="not-checked">Not checked in</span>}</span>
     </div>
 
-    {attendee.paymentStatus === "Pending" && !paymentFormOpen && <div className="payment-due-card">
+    {actionError && <p className="payment-form-error" role="alert">{actionError}</p>}
+
+    {attendee.paymentStatus === "Pending" && !paymentFormOpen && canTakePayments && <div className="payment-due-card">
       <div><span>Amount due</span><strong>₦{REGISTRATION_FEE.toLocaleString("en-NG")}</strong></div>
       <p>Confirm only after the transfer, POS payment, or cash has been received.</p>
       <button className="admin-primary-button" type="button" onClick={() => setPaymentFormOpen(true)}>Confirm event-day payment</button>
     </div>}
 
-    {attendee.paymentStatus === "Pending" && paymentFormOpen && <form className="event-payment-form" onSubmit={submitPayment}>
+    {attendee.paymentStatus === "Pending" && !canTakePayments && <div className="payment-due-card"><p>Payment must be confirmed by an admin assigned to the payment desk.</p></div>}
+
+    {attendee.paymentStatus === "Pending" && paymentFormOpen && canTakePayments && <form className="event-payment-form" onSubmit={submitPayment}>
       <div className="event-payment-heading"><div><span>Event-day payment</span><strong>₦{REGISTRATION_FEE.toLocaleString("en-NG")}</strong></div><button type="button" onClick={() => { setPaymentFormOpen(false); setPaymentError(""); }}>Cancel</button></div>
       <fieldset><legend>Payment method</legend><div className="payment-methods">{(["Bank transfer", "POS", "Cash"] as PaymentMethod[]).map((item) => <label className={method === item ? "selected" : ""} key={item}><input type="radio" name="payment-method" value={item} checked={method === item} onChange={() => { setMethod(item); setPaymentError(""); }} /><span>{item}</span></label>)}</div></fieldset>
       {method !== "Cash" && <label className="payment-reference-field"><span>{method === "POS" ? "POS" : "Bank"} transaction reference</span><input value={reference} onChange={(event) => { setReference(event.target.value); setPaymentError(""); }} placeholder={method === "POS" ? "e.g. 784291" : "e.g. NIP-38492017"} autoFocus /></label>}
       {paymentError && <p className="payment-form-error" role="alert">{paymentError}</p>}
-      <label className="payment-checkin-option"><input type="checkbox" checked={checkInNow} onChange={(event) => setCheckInNow(event.target.checked)} /><span><strong>Check attendee in immediately</strong><small>Use this when payment and entry happen at the same desk.</small></span></label>
-      <button className="admin-primary-button" type="submit"><Icon name="check" /> {checkInNow ? "Confirm payment & check in" : "Confirm payment"}</button>
+      {canCheckIn && <label className="payment-checkin-option"><input type="checkbox" checked={checkInNow} onChange={(event) => setCheckInNow(event.target.checked)} /><span><strong>Check attendee in immediately</strong><small>Use this when payment and entry happen at the same desk.</small></span></label>}
+      <button className="admin-primary-button" type="submit" disabled={busy}><Icon name="check" /> {busy ? "Saving…" : checkInNow && canCheckIn ? "Confirm payment & check in" : "Confirm payment"}</button>
     </form>}
 
     {attendee.paymentStatus === "Paid" && attendee.paymentMethod && <section className="payment-audit-record" aria-label="Payment record">
@@ -367,13 +336,20 @@ function AttendeeResult({ attendee, onCheckIn, onConfirmPayment, onScanAnother }
       </div>
     </section>}
 
-    {attendee.paymentStatus === "Paid" && (attendee.checkedIn
+    {attendee.paymentStatus === "Paid" && canCheckIn && (attendee.checkedIn
       ? <div className="scan-complete"><Icon name="check" /> This attendee has already checked in.</div>
-      : <button className="admin-primary-button" type="button" onClick={onCheckIn}><Icon name="check" /> Confirm check-in</button>)}
+      : <button className="admin-primary-button" type="button" onClick={onCheckIn} disabled={busy}><Icon name="check" /> {busy ? "Saving…" : "Confirm check-in"}</button>)}
+    {attendee.paymentStatus === "Paid" && !attendee.checkedIn && !canCheckIn && <div className="payment-due-card"><p>Check-in must be completed by an admin assigned to the entrance desk.</p></div>}
     <button className="admin-secondary-button" type="button" onClick={onScanAnother}>Scan another ticket</button>
   </div>;
 }
 
 function initials(name: string) {
   return name.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
+}
+
+function roleLabel(role: AdminProfile["role"]) {
+  if (role === "admin") return "Full administrator";
+  if (role === "payment") return "Payment desk";
+  return "Check-in team";
 }

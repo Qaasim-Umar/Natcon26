@@ -1,4 +1,4 @@
-# Supabase registration setup
+# Supabase setup
 
 The registration frontend now talks to server-only Next.js API routes. The Supabase secret is never sent to the browser.
 
@@ -17,6 +17,7 @@ Copy `.env.example` to `.env.local`, then replace the placeholders with the valu
 ```env
 SUPABASE_URL=https://your-project-ref.supabase.co
 SUPABASE_SECRET_KEY=sb_secret_your_server_key
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_public_key
 ```
 
 Do not rename the secret to a `NEXT_PUBLIC_` variable and do not commit `.env.local`.
@@ -25,4 +26,31 @@ Do not rename the secret to a `NEXT_PUBLIC_` variable and do not commit `.env.lo
 
 Restart the Next.js development server after adding the environment variables. New registrations will then be stored in Supabase, and ticket retrieval will search the stored attendee records.
 
-The admin dashboard is intentionally not connected to these tables yet.
+## 4. Enable the admin portal
+
+Open **SQL Editor** and run:
+
+`supabase/migrations/20260929142246_admin_backend.sql`
+
+This adds admin roles, attendee payment/check-in fields, and an audit log. It also adds transactional database functions so two admins cannot confirm the same payment or check in the same attendee at the same time.
+
+## 5. Create an admin account
+
+In Supabase, open **Authentication → Users → Add user**, enter the admin's email and password, and enable automatic email confirmation. Copy the new user's UUID.
+
+Then run this in **SQL Editor**, replacing the sample values:
+
+```sql
+insert into public.admin_profiles (user_id, full_name, role)
+values ('AUTH-USER-UUID', 'Admin Full Name', 'admin');
+```
+
+Available roles are:
+
+- `admin`: payments and check-in
+- `payment`: payments only
+- `check_in`: check-in only
+
+Create a separate Auth user and profile row for each event worker. The dashboard records which worker confirmed each payment and check-in.
+
+After restarting the app, visit `/admin` and sign in with the assigned admin account.
