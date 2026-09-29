@@ -444,7 +444,7 @@ export function EventRegistration() {
         </section>
       </main>
 
-      <footer className="site-footer"><div className="container footer-grid footer-grid-compact"><div><Brand footer /><p>Raising responsible Muslim leaders.</p></div><div><h3>Enquiries &amp; sponsorship</h3><a href="tel:+2349152677650">0915 267 7650</a><a href="tel:+2348132444849">0813 244 4849</a><a href="tel:+2348136436127">0813 643 6127</a></div></div><div className="container footer-bottom"><span>© 2026 The Achiever Ambassadors Islamic Foundation</span></div></footer>
+      <footer className="site-footer"><div className="container footer-grid"><div><Brand footer /><p>Raising responsible Muslim leaders.</p></div><div><h3>Enquiries &amp; sponsorship</h3><a href="tel:+2349152677650">0915 267 7650</a><a href="tel:+2348132444849">0813 244 4849</a><a href="tel:+2348136436127">0813 643 6127</a></div><div><h3>Event team</h3><a href="/admin">Admin portal</a></div></div><div className="container footer-bottom"><span>© 2026 The Achiever Ambassadors Islamic Foundation</span></div></footer>
 
       <dialog ref={reviewDialog} aria-labelledby="dialog-title" onClose={() => document.body.classList.remove("dialog-open")}>
         {reviewMode === "review" ? (
