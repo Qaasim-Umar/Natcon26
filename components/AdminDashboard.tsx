@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type { Html5Qrcode } from "html5-qrcode";
 
 import type { AdminAttendee, AdminProfile, PaymentMethod } from "@/lib/admin";
 import { formatAttendeeNumber } from "@/lib/registration";
@@ -42,7 +41,9 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
   const [actionError, setActionError] = useState("");
   const [actionLoading, setActionLoading] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const scannerRef = useRef<Html5Qrcode | null>(null);
+  const scannerVideoRef = useRef<HTMLVideoElement>(null);
+  const scannerStreamRef = useRef<MediaStream | null>(null);
+  const scannerFrameRef = useRef<number | null>(null);
   const scannerHintTimerRef = useRef<number | null>(null);
   const scannerCloseButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -73,7 +74,8 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
 
   useEffect(() => () => {
     if (scannerHintTimerRef.current) window.clearTimeout(scannerHintTimerRef.current);
-    scannerRef.current?.stop().catch(() => undefined);
+    if (scannerFrameRef.current) window.cancelAnimationFrame(scannerFrameRef.current);
+    scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
   }, []);
 
   const filtered = useMemo(() => attendees.filter((attendee) => {
@@ -128,30 +130,62 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
     setSelected(null);
     setScanning(true);
     try {
-      const { Html5Qrcode } = await import("html5-qrcode");
-      const scanner = new Html5Qrcode("admin-qr-reader");
-      scannerRef.current = scanner;
-      await scanner.start(
-        { facingMode: "environment" },
-        {
-          fps: 10,
-          disableFlip: false
-        },
-        async (decodedText) => {
-          if (scannerHintTimerRef.current) window.clearTimeout(scannerHintTimerRef.current);
-          resolveScan(decodedText);
-          await scanner.stop().catch(() => undefined);
-          scannerRef.current = null;
-          setScanning(false);
-        },
-        () => undefined
-      );
+      if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser does not support live camera scanning.");
+
+      const [{ default: jsQR }, stream] = await Promise.all([
+        import("jsqr"),
+        navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: { facingMode: "environment" }
+        })
+      ]);
+      const video = scannerVideoRef.current;
+      if (!video) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error("The camera preview is not ready.");
+      }
+
+      scannerStreamRef.current = stream;
+      video.srcObject = stream;
+      await video.play();
+
+      const canvas = document.createElement("canvas");
+      const context = canvas.getContext("2d", { willReadFrequently: true });
+      if (!context) throw new Error("The QR decoder could not be prepared.");
+
+      let lastDecodedFrame = 0;
+      const decodeFrame = (time: number) => {
+        if (scannerStreamRef.current !== stream) return;
+        if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && time - lastDecodedFrame >= 100) {
+          lastDecodedFrame = time;
+          const scale = Math.min(1, 960 / video.videoWidth);
+          const width = Math.max(1, Math.round(video.videoWidth * scale));
+          const height = Math.max(1, Math.round(video.videoHeight * scale));
+          if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+          }
+          context.drawImage(video, 0, 0, width, height);
+          const frame = context.getImageData(0, 0, width, height);
+          const result = jsQR(frame.data, width, height, { inversionAttempts: "attemptBoth" });
+          if (result?.data) {
+            if (scannerHintTimerRef.current) window.clearTimeout(scannerHintTimerRef.current);
+            resolveScan(result.data);
+            void stopScanner();
+            return;
+          }
+        }
+        scannerFrameRef.current = window.requestAnimationFrame(decodeFrame);
+      };
+      scannerFrameRef.current = window.requestAnimationFrame(decodeFrame);
+
       scannerHintTimerRef.current = window.setTimeout(() => {
-        if (scannerRef.current !== scanner || !scanner.isScanning) return;
+        if (scannerStreamRef.current !== stream) return;
         setScannerMessage("No QR code detected yet. Fill most of the camera view with the square QR code, hold the phone steady, and avoid glare.");
       }, 7000);
     } catch (error) {
-      scannerRef.current = null;
+      scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
+      scannerStreamRef.current = null;
       setScannerMessage(error instanceof Error
         ? `The scanner could not start: ${error.message}`
         : "The scanner could not start. Search by name or attendee ID instead.");
@@ -164,8 +198,13 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
       window.clearTimeout(scannerHintTimerRef.current);
       scannerHintTimerRef.current = null;
     }
-    await scannerRef.current?.stop().catch(() => undefined);
-    scannerRef.current = null;
+    if (scannerFrameRef.current) {
+      window.cancelAnimationFrame(scannerFrameRef.current);
+      scannerFrameRef.current = null;
+    }
+    scannerStreamRef.current?.getTracks().forEach((track) => track.stop());
+    scannerStreamRef.current = null;
+    if (scannerVideoRef.current) scannerVideoRef.current.srcObject = null;
     setScanning(false);
   };
 
@@ -287,7 +326,7 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
         </section>
       </main>
 
-      {scannerOpen && createPortal(<div className="scanner-modal" role="dialog" aria-modal="true" aria-labelledby="scanner-title"><div className="scanner-panel"><div className="scanner-header"><div><p>Door check-in</p><h2 id="scanner-title">Scan attendee ticket</h2></div><button ref={scannerCloseButtonRef} type="button" onClick={closeScanner} aria-label="Close scanner">×</button></div>{!selected && <><div className={`scanner-viewport${scanning ? " is-scanning" : ""}`}><div id="admin-qr-reader" /><div className="scanner-placeholder"><Icon name="scan" /><strong>{scanning ? "Point the camera at the QR code" : "Ready to scan"}</strong><span>Hold the attendee&apos;s ticket inside the frame.</span></div></div>{scannerMessage && <p className="scanner-message" role="alert">{scannerMessage}</p>}<div className="scanner-actions">{scanning ? <button className="admin-secondary-button" type="button" onClick={stopScanner}>Stop camera</button> : <button className="admin-primary-button" type="button" onClick={startScanner}>Start camera</button>}<button className="admin-text-button" type="button" onClick={closeScanner}>Search attendee instead</button></div></>}{selected && <AttendeeResult attendee={selected} canTakePayments={admin.role === "admin" || admin.role === "payment"} canCheckIn={admin.role === "admin" || admin.role === "check_in"} busy={actionLoading} actionError={actionError} onCheckIn={() => void checkIn(selected)} onConfirmPayment={(payment, checkInNow) => void confirmPayment(selected, payment, checkInNow)} onScanAnother={() => { setSelected(null); setScannerMessage(""); setActionError(""); }} />}</div></div>, document.body)}
+      {scannerOpen && createPortal(<div className="scanner-modal" role="dialog" aria-modal="true" aria-labelledby="scanner-title"><div className="scanner-panel"><div className="scanner-header"><div><p>Door check-in</p><h2 id="scanner-title">Scan attendee ticket</h2></div><button ref={scannerCloseButtonRef} type="button" onClick={closeScanner} aria-label="Close scanner">×</button></div>{!selected && <><div className={`scanner-viewport${scanning ? " is-scanning" : ""}`}><video id="admin-qr-reader" ref={scannerVideoRef} muted playsInline aria-label="Live camera preview for scanning an attendee ticket" /><div className="scanner-placeholder"><Icon name="scan" /><strong>{scanning ? "Point the camera at the QR code" : "Ready to scan"}</strong><span>Hold the attendee&apos;s ticket inside the frame.</span></div></div>{scannerMessage && <p className="scanner-message" role="alert">{scannerMessage}</p>}<div className="scanner-actions">{scanning ? <button className="admin-secondary-button" type="button" onClick={stopScanner}>Stop camera</button> : <button className="admin-primary-button" type="button" onClick={startScanner}>Start camera</button>}<button className="admin-text-button" type="button" onClick={closeScanner}>Search attendee instead</button></div></>}{selected && <AttendeeResult attendee={selected} canTakePayments={admin.role === "admin" || admin.role === "payment"} canCheckIn={admin.role === "admin" || admin.role === "check_in"} busy={actionLoading} actionError={actionError} onCheckIn={() => void checkIn(selected)} onConfirmPayment={(payment, checkInNow) => void confirmPayment(selected, payment, checkInNow)} onScanAnother={() => { setSelected(null); setScannerMessage(""); setActionError(""); }} />}</div></div>, document.body)}
     </div>
   );
 }
