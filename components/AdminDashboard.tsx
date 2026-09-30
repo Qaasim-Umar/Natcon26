@@ -128,21 +128,13 @@ export function AdminDashboard({ admin }: { admin: AdminProfile }) {
     setSelected(null);
     setScanning(true);
     try {
-      const { Html5Qrcode, Html5QrcodeSupportedFormats } = await import("html5-qrcode");
-      const scanner = new Html5Qrcode("admin-qr-reader", {
-        formatsToSupport: [Html5QrcodeSupportedFormats.QR_CODE],
-        experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-        verbose: false
-      });
+      const { Html5Qrcode } = await import("html5-qrcode");
+      const scanner = new Html5Qrcode("admin-qr-reader");
       scannerRef.current = scanner;
       await scanner.start(
+        { facingMode: "environment" },
         {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        {
-          fps: 15,
+          fps: 10,
           disableFlip: false
         },
         async (decodedText) => {
