@@ -46,10 +46,9 @@ export async function GET(request: Request) {
     return unavailable();
   }
 
-  // Sajal keeps the category as its label, which the ticket shows as it is.
   const tickets: RegistrationTicket[] = ((data ?? []) as TicketRow[]).map((row) => ({
     fullName: row.full_name,
-    category: row.level ?? "",
+    level: row.level ?? "",
     reference: row.registration_code,
     qrPayload: row.qr_payload
   }));

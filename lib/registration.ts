@@ -1,13 +1,19 @@
 export const MAX_REGISTRATION_ATTENDEES = 10;
 
+// One attendee as the form sends it. The same details Sajal's app takes at
+// the gate, less the house, the notes and the payment, which are the gate's.
 export type RegistrationAttendee = {
   fullName: string;
+  gender: string;
   email: string;
   phone: string;
-  gender: string;
-  category: string;
+  dateOfBirth: string;
   institution: string;
-  state: string;
+  course: string;
+  level: string;
+  stateOfOrigin: string;
+  stateOfResidence: string;
+  timesAttended: number;
 };
 
 // What the website shows for one attendee after registering or looking a
@@ -15,7 +21,7 @@ export type RegistrationAttendee = {
 // encodes `qrPayload` exactly as the database returned it.
 export type RegistrationTicket = {
   fullName: string;
-  category: string;
+  level: string;
   reference: string;
   qrPayload: string;
 };
@@ -36,14 +42,14 @@ export const formatAttendeeNumber = (value: number) =>
 export const formatCheckInCode = (value: string) =>
   value.length === 6 ? `${value.slice(0, 3)} ${value.slice(3)}` : value;
 
-export const CATEGORY_LABELS: Record<string, string> = {
-  "school-leaver": "Secondary school leaver",
-  undergraduate: "Undergraduate",
-  postgraduate: "Postgraduate student",
-  other: "Other"
-};
-
-export const categoryLabel = (value: string) => CATEGORY_LABELS[value] ?? value;
+// Suggestions for the level field; anything else can be typed. The same list
+// as the Sajal app's StudyLevels: university years, then a polytechnic's ND
+// and HND years, then a college of education's NCE years.
+export const LEVELS = [
+  "100 Level", "200 Level", "300 Level", "400 Level", "500 Level", "600 Level",
+  "ND 1", "ND 2", "HND 1", "HND 2", "NCE 1", "NCE 2", "NCE 3",
+  "Pre-degree", "PGD", "Masters", "PhD", "Graduate", "Secondary school", "Secondary school leaver"
+] as const;
 
 // Sajal stores states by code. The form shows names.
 export const STATE_CODES: Record<string, string> = {
@@ -55,11 +61,43 @@ export const STATE_CODES: Record<string, string> = {
   Rivers: "RI", Sokoto: "SO", Taraba: "TA", Yobe: "YO", Zamfara: "ZA"
 };
 
+// The order the state lists show, as in the Sajal app: the South West first,
+// Oyo then Osun, then the North Central, Kwara first, then the rest by name.
+// That is where most attendees come from.
+const SOUTH_WEST = ["Oyo", "Osun", "Ekiti", "Lagos", "Ogun", "Ondo"];
+const NORTH_CENTRAL = ["Kwara", "Benue", "FCT Abuja", "Kogi", "Nasarawa", "Niger", "Plateau"];
+export const STATE_NAMES: readonly string[] = [
+  ...SOUTH_WEST,
+  ...NORTH_CENTRAL,
+  ...Object.keys(STATE_CODES)
+    .filter((name) => !SOUTH_WEST.includes(name) && !NORTH_CENTRAL.includes(name))
+    .sort((a, b) => a.localeCompare(b))
+];
+
 const allowedGenders = new Set(["female", "male"]);
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const clean = (value: unknown, maxLength: number) =>
   typeof value === "string" ? value.trim().slice(0, maxLength) : "";
+
+const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+
+// A date of birth is optional; when given it must be a real day, from 1900 to
+// today, which is what Sajal accepts.
+const validDateOfBirth = (value: string) => {
+  if (!value) return true;
+  if (!datePattern.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime())
+    && date.toISOString().slice(0, 10) === value
+    && value >= "1900-01-01"
+    && date.getTime() <= Date.now();
+};
+
+const wholeNumber = (value: unknown) => {
+  const text = typeof value === "number" ? String(value) : typeof value === "string" ? value.trim() : "";
+  return /^\d{1,3}$/.test(text) ? Number(text) : Number.NaN;
+};
 
 export function parseRegistrationAttendees(input: unknown): RegistrationAttendee[] | null {
   if (!Array.isArray(input) || input.length < 1 || input.length > MAX_REGISTRATION_ATTENDEES) return null;
@@ -68,22 +106,29 @@ export function parseRegistrationAttendees(input: unknown): RegistrationAttendee
     if (!value || typeof value !== "object") return null;
     const item = value as Record<string, unknown>;
     const attendee: RegistrationAttendee = {
-      fullName: clean(item.fullName, 120),
+      fullName: clean(item.fullName, 150),
+      gender: clean(item.gender, 24),
       email: clean(item.email, 254).toLowerCase(),
       phone: clean(item.phone, 32),
-      gender: clean(item.gender, 24),
-      category: clean(item.category, 32),
-      institution: clean(item.institution, 160),
-      state: clean(item.state, 64)
+      dateOfBirth: clean(item.dateOfBirth, 10),
+      institution: clean(item.institution, 200),
+      course: clean(item.course, 200),
+      level: clean(item.level, 50),
+      stateOfOrigin: clean(item.stateOfOrigin, 64),
+      stateOfResidence: clean(item.stateOfResidence, 64),
+      timesAttended: wholeNumber(item.timesAttended ?? 0)
     };
 
     if (
       attendee.fullName.length < 2 ||
+      !allowedGenders.has(attendee.gender) ||
       !emailPattern.test(attendee.email) ||
       attendee.phone.length < 7 ||
-      !allowedGenders.has(attendee.gender) ||
-      !(attendee.category in CATEGORY_LABELS) ||
-      !(attendee.state in STATE_CODES)
+      !validDateOfBirth(attendee.dateOfBirth) ||
+      !attendee.level ||
+      (attendee.stateOfOrigin !== "" && !(attendee.stateOfOrigin in STATE_CODES)) ||
+      !(attendee.stateOfResidence in STATE_CODES) ||
+      !(attendee.timesAttended >= 0 && attendee.timesAttended <= 100)
     ) return null;
 
     return attendee;
