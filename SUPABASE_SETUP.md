@@ -1,64 +1,44 @@
 # Supabase setup
 
-The registration frontend now talks to server-only Next.js API routes. The Supabase secret is never sent to the browser.
+The website registers people into **Sajal**, the TAA event app, and shares its Supabase project.
+The schema lives in the Sajal repository (`supabase/migrations`); this repository has none of its
+own. The full contract is Sajal's `docs/self_registration.md`.
 
-## 1. Create the database tables
+## How it works
 
-Open your Supabase project, go to **SQL Editor**, and run:
+- The browser only talks to this site's API routes. The routes call Sajal's public registration
+  functions with the **publishable key**, which can do nothing else: it cannot read or change any
+  table.
+- `POST /api/registrations` calls `self_register_group`, which registers every attendee on the
+  form or none of them. Each attendee comes back with a six-character check-in code and the text
+  to encode in their QR.
+- `GET /api/tickets?email=` calls `self_registration_tickets` to show a ticket again.
+- The fee and whether registration is open come from the event in Sajal, read on every page view
+  through `self_registration_events`.
+- At the venue, officers scan the QR (or type the code, or the phone number) in the Sajal app,
+  take payment and check the person in.
 
-`supabase/migrations/20260929060754_registration_schema.sql`
+Each attendee needs their own email address and phone number: Sajal refuses a second
+registration with either in the same event.
 
-This creates the `registrations` and `attendees` tables, enables Row Level Security, blocks browser roles from reading them directly, and adds the atomic registration function used by the API.
+## 1. Prepare the event in Sajal
 
-## 2. Add the server environment variables
+The event must be `active`, have `self_registration_enabled = true`, and have its registration
+window open. Its fee (`fee_kobo`, plus any early bird) is what the website charges.
 
-Copy `.env.example` to `.env.local`, then replace the placeholders with the values from the Supabase project **Connect** dialog:
+## 2. Environment variables
+
+Copy `.env.example` to `.env.local` (or set them on the host):
 
 ```env
-SUPABASE_URL=https://your-project-ref.supabase.co
-SUPABASE_SECRET_KEY=sb_secret_your_server_key
-SUPABASE_PUBLISHABLE_KEY=sb_publishable_your_public_key
+SUPABASE_URL=https://<sajal project ref>.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+SAJAL_EVENT_ID=<the event's id>
 ```
 
-Do not rename the secret to a `NEXT_PUBLIC_` variable and do not commit `.env.local`.
+Restart the app after changing them.
 
-## 3. Restart the app
+## The admin portal
 
-Restart the Next.js development server after adding the environment variables. New registrations will then be stored in Supabase, and ticket retrieval will search the stored attendee records.
-
-## 4. Enable the admin portal
-
-Open **SQL Editor** and run:
-
-`supabase/migrations/20260929142246_admin_backend.sql`
-
-This adds admin roles, attendee payment/check-in fields, and an audit log. It also adds transactional database functions so two admins cannot confirm the same payment or check in the same attendee at the same time.
-
-## 5. Create an admin account
-
-In Supabase, open **Authentication → Users → Add user**, enter the admin's email and password, and enable automatic email confirmation. Copy the new user's UUID.
-
-Then run this in **SQL Editor**, replacing the sample values:
-
-```sql
-insert into public.admin_profiles (user_id, full_name, role)
-values ('AUTH-USER-UUID', 'Admin Full Name', 'admin');
-```
-
-Available roles are:
-
-- `admin`: payments and check-in
-- `payment`: payments only
-- `check_in`: check-in only
-
-Create a separate Auth user and profile row for each event worker. The dashboard records which worker confirmed each payment and check-in.
-
-After restarting the app, visit `/admin` and sign in with the assigned admin account.
-
-## 6. Add sequential attendee IDs and scannable ticket links
-
-Run this migration after the registration and admin migrations:
-
-`supabase/migrations/20260929175525_attendee_numbers_qr_links.sql`
-
-It assigns every existing and future attendee a unique sequential number (`001`, `002`, `003`, and so on). Ticket QR codes use a normal HTTPS admin lookup link, so phone camera apps recognize them and signed-in admins can open the attendee record directly.
+`/admin` and `/api/admin/*` were built for the website's previous Supabase project and are not
+connected to Sajal yet. The footer link to it is hidden. Officers use the Sajal app.
