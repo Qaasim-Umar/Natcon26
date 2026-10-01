@@ -3,9 +3,14 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 
-import { formatAttendeeNumber, type RegistrationTicket } from "@/lib/registration";
+import {
+  categoryLabel,
+  findSharedContact,
+  formatCheckInCode,
+  type RegistrationEvent,
+  type RegistrationTicket
+} from "@/lib/registration";
 
-const PRICE_PER_ATTENDEE = 8000;
 const MAX_ATTENDEES = 10;
 const NIGERIAN_STATES = [
   "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno",
@@ -37,13 +42,6 @@ const formatNaira = (value: number) =>
     .format(value)
     .replace("NGN", "₦");
 
-const categoryLabel = (value: string) => ({
-  "school-leaver": "Secondary school leaver",
-  undergraduate: "Undergraduate",
-  postgraduate: "Postgraduate student",
-  other: "Other"
-}[value] ?? value);
-
 function ArrowIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>;
 }
@@ -69,21 +67,25 @@ function Brand({ footer = false }: { footer?: boolean }) {
   );
 }
 
-function MockQr({ seed }: { seed: string }) {
+// Encodes Sajal's QR payload exactly as the database returned it: the Sajal
+// app reads the event id out of it and refuses a ticket for another event.
+function MockQr({ payload }: { payload: string }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ticketUrl = new URL("/admin", window.location.origin);
-    ticketUrl.searchParams.set("ticket", seed);
-
-    QRCode.toCanvas(canvas, ticketUrl.toString(), {
+    QRCode.toCanvas(canvas, payload, {
       width: 320,
       margin: 1,
       errorCorrectionLevel: "M",
       color: { dark: "#07154f", light: "#ffffff" }
+    }).then(() => {
+      // The library sets an inline 320px size, which beats the stylesheet and
+      // pushes the ticket off a phone screen. Render at 320, display per CSS.
+      canvas.style.removeProperty("width");
+      canvas.style.removeProperty("height");
     }).catch(() => {
       const context = canvas.getContext("2d");
       if (!context) return;
@@ -93,14 +95,14 @@ function MockQr({ seed }: { seed: string }) {
       context.textAlign = "center";
       context.fillText("QR unavailable", canvas.width / 2, canvas.height / 2);
     });
-  }, [seed]);
+  }, [payload]);
 
-  return <canvas ref={canvasRef} width="192" height="192" role="img" aria-label="Ticket QR code that opens the admin attendee lookup" />;
+  return <canvas ref={canvasRef} width="192" height="192" role="img" aria-label="Ticket QR code for check-in at the venue" />;
 }
 
 function Ticket({ ticket }: { ticket: StoredTicket }) {
   const initials = ticket.fullName.split(" ").map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-  const attendeeId = formatAttendeeNumber(ticket.attendeeNumber);
+  const checkInCode = formatCheckInCode(ticket.reference);
   const ticketRef = useRef<HTMLElement>(null);
 
   const downloadTicket = () => {
@@ -180,10 +182,10 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
     context.stroke();
     context.fillStyle = "#8a92a2";
     context.font = "800 14px Arial";
-    context.fillText("ATTENDEE ID", 52, 556);
+    context.fillText("CHECK-IN CODE", 52, 556);
     context.fillStyle = "#0b2472";
     context.font = "800 22px Arial";
-    context.fillText(attendeeId, 52, 590);
+    context.fillText(checkInCode, 52, 590);
 
     roundedBox(108, 628, 504, 344, 28, "#07154f");
     context.fillStyle = "#9fd7f6";
@@ -198,7 +200,7 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
     context.fillRect(0, 1008, 720, 72);
     context.fillStyle = "#ffffff";
     context.font = "800 17px Arial";
-    context.fillText(`ATTENDEE ${attendeeId}`, 360, 1042);
+    context.fillText(`CODE ${checkInCode}`, 360, 1042);
     context.font = "700 12px Arial";
     context.fillStyle = "rgba(255,255,255,.68)";
     context.fillText("PRESENT THIS PASS AT THE ENTRANCE", 360, 1064);
@@ -232,12 +234,12 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
           <div><span>Date</span><strong>1–4 Oct 2026</strong></div>
           <div><span>Venue</span><strong>Iwo, Osun</strong></div>
         </div>
-        <div className="ticket-attendee-id"><span>Attendee ID</span><strong>{attendeeId}</strong></div>
+        <div className="ticket-attendee-id"><span>Check-in code</span><strong>{checkInCode}</strong></div>
       </div>
       <div className="ticket-code">
         <span className="ticket-scan-label">Scan for entry</span>
-        <MockQr seed={ticket.reference} />
-        <strong>Attendee {attendeeId}</strong>
+        <MockQr payload={ticket.qrPayload} />
+        <strong>{checkInCode}</strong>
         <span>Present at entrance</span>
       </div>
     </article>
@@ -246,7 +248,7 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
   );
 }
 
-export function EventRegistration() {
+export function EventRegistration({ event }: { event: RegistrationEvent | null }) {
   const [theme, setTheme] = useState<Theme>("dark");
   const [attendees, setAttendees] = useState<Attendee[]>([emptyAttendee()]);
   const [errors, setErrors] = useState<Errors>({});
@@ -262,7 +264,13 @@ export function EventRegistration() {
   const reviewDialog = useRef<HTMLDialogElement>(null);
   const retrieveDialog = useRef<HTMLDialogElement>(null);
 
-  const total = attendees.length * PRICE_PER_ATTENDEE;
+  const pricePerAttendee = event?.feeNaira ?? 0;
+  const total = attendees.length * pricePerAttendee;
+  const closedNotice = !event
+    ? "Online registration is temporarily unavailable. Please try again shortly."
+    : !event.registrationOpen
+      ? "Online registration is closed. Please register at the venue."
+      : "";
 
   useEffect(() => {
     try {
@@ -303,6 +311,12 @@ export function EventRegistration() {
       });
       if (attendee.email && !/^\S+@\S+\.\S+$/.test(attendee.email)) next[`${index}.email`] = "Enter a valid email address.";
     });
+    const shared = findSharedContact(attendees);
+    if (shared && !next[`${shared.index}.${shared.field}`]) {
+      next[`${shared.index}.${shared.field}`] = shared.field === "email"
+        ? "Each attendee needs their own email address."
+        : "Each attendee needs their own phone number.";
+    }
     setErrors(next);
     if (Object.keys(next).length) {
       const [index, field] = Object.keys(next)[0].split(".");
@@ -312,9 +326,9 @@ export function EventRegistration() {
     return true;
   };
 
-  const openReview = (event: FormEvent) => {
-    event.preventDefault();
-    if (!validate()) return;
+  const openReview = (formEvent: FormEvent) => {
+    formEvent.preventDefault();
+    if (closedNotice || !validate()) return;
     setSubmissionError("");
     setReviewMode("review");
     reviewDialog.current?.showModal();
@@ -356,8 +370,8 @@ export function EventRegistration() {
     document.body.classList.add("dialog-open");
   };
 
-  const retrieve = async (event: FormEvent) => {
-    event.preventDefault();
+  const retrieve = async (formEvent: FormEvent) => {
+    formEvent.preventDefault();
     if (!/^\S+@\S+\.\S+$/.test(retrieveEmail)) {
       setRetrieveError("Enter a valid registration email address.");
       return;
@@ -440,15 +454,15 @@ export function EventRegistration() {
                 {attendees.map((attendee, index) => <AttendeeForm key={index} attendee={attendee} index={index} errors={errors} update={updateAttendee} />)}
               </div>
               <div className="checkout-card">
-                <div className="checkout-total"><span>Total registration fee</span><strong>{formatNaira(total)}</strong><small>{attendees.length} {attendees.length === 1 ? "attendee" : "attendees"} × {formatNaira(PRICE_PER_ATTENDEE)}</small></div>
-                <button className="button button-primary button-submit" type="submit">Continue registration <ArrowIcon /></button>
+                <div className="checkout-total"><span>Total registration fee</span><strong>{formatNaira(total)}</strong><small>{closedNotice || `${attendees.length} ${attendees.length === 1 ? "attendee" : "attendees"} × ${formatNaira(pricePerAttendee)}`}</small></div>
+                <button className="button button-primary button-submit" type="submit" disabled={Boolean(closedNotice)}>Continue registration <ArrowIcon /></button>
               </div>
             </form>
           </div>
         </section>
       </main>
 
-      <footer className="site-footer"><div className="container footer-grid"><div><Brand footer /><p>Raising responsible Muslim leaders.</p></div><div><h3>Enquiries &amp; sponsorship</h3><a href="tel:+2349152677650">0915 267 7650</a><a href="tel:+2348132444849">0813 244 4849</a><a href="tel:+2348136436127">0813 643 6127</a></div><div><h3>Event team</h3><a href="/admin">Admin portal</a></div></div><div className="container footer-bottom"><span>© 2026 The Achiever Ambassadors Islamic Foundation</span></div></footer>
+      <footer className="site-footer"><div className="container footer-grid"><div><Brand footer /><p>Raising responsible Muslim leaders.</p></div><div><h3>Enquiries &amp; sponsorship</h3><a href="tel:+2349152677650">0915 267 7650</a><a href="tel:+2348132444849">0813 244 4849</a><a href="tel:+2348136436127">0813 643 6127</a></div>{/* Admin portal hidden until it is rewired to Sajal accounts. */}{/* <div><h3>Event team</h3><a href="/admin">Admin portal</a></div> */}</div><div className="container footer-bottom"><span>© 2026 The Achiever Ambassadors Islamic Foundation</span></div></footer>
 
       <dialog ref={reviewDialog} aria-labelledby="dialog-title" onClose={() => document.body.classList.remove("dialog-open")}>
         {reviewMode === "review" ? (
@@ -486,7 +500,7 @@ function AttendeeForm({ attendee, index, errors, update }: { attendee: Attendee;
         <Field label="Full name" id={`fullName-${suffix}`} error={error("fullName")}><input id={`fullName-${suffix}`} type="text" placeholder="e.g. Aisha Bello" autoComplete="name" {...common("fullName")} /></Field>
         <Field label="Email address" id={`email-${suffix}`} error={error("email")}><input id={`email-${suffix}`} type="email" placeholder="aisha@example.com" autoComplete="email" {...common("email")} /></Field>
         <Field label="Phone number" id={`phone-${suffix}`} error={error("phone")}><input id={`phone-${suffix}`} type="tel" placeholder="0800 000 0000" autoComplete="tel" {...common("phone")} /></Field>
-        <Field label="Gender" id={`gender-${suffix}`} error={error("gender")}><select id={`gender-${suffix}`} {...common("gender")}><option value="">Select gender</option><option value="female">Female</option><option value="male">Male</option><option value="prefer-not-to-say">Prefer not to say</option></select></Field>
+        <Field label="Gender" id={`gender-${suffix}`} error={error("gender")}><select id={`gender-${suffix}`} {...common("gender")}><option value="">Select gender</option><option value="female">Female</option><option value="male">Male</option></select></Field>
         <Field label="Attendee category" id={`category-${suffix}`} error={error("category")}><select id={`category-${suffix}`} {...common("category")}><option value="">Select category</option><option value="school-leaver">Secondary school leaver</option><option value="undergraduate">Undergraduate</option><option value="postgraduate">Postgraduate student</option><option value="other">Other</option></select></Field>
         <Field label="School or organisation" id={`institution-${suffix}`} error="" required={false}><input id={`institution-${suffix}`} type="text" placeholder="Optional" autoComplete="organization" {...common("institution")} /></Field>
         <Field label="State of residence" id={`state-${suffix}`} error={error("state")} wide><select id={`state-${suffix}`} autoComplete="address-level1" {...common("state")}><option value="">Select state</option>{NIGERIAN_STATES.map((state) => <option value={state} key={state}>{state}</option>)}</select></Field>
