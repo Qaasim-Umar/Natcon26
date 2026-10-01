@@ -3,39 +3,44 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 
+import { INSTITUTIONS, INSTITUTION_ABBREVIATIONS } from "@/lib/institutions";
 import {
-  categoryLabel,
   findSharedContact,
   formatCheckInCode,
+  LEVELS,
+  STATE_NAMES,
   type RegistrationEvent,
   type RegistrationTicket
 } from "@/lib/registration";
 
 const MAX_ATTENDEES = 10;
-const NIGERIAN_STATES = [
-  "Abia", "Adamawa", "Akwa Ibom", "Anambra", "Bauchi", "Bayelsa", "Benue", "Borno",
-  "Cross River", "Delta", "Ebonyi", "Edo", "Ekiti", "Enugu", "FCT Abuja", "Gombe",
-  "Imo", "Jigawa", "Kaduna", "Kano", "Katsina", "Kebbi", "Kogi", "Kwara", "Lagos",
-  "Nasarawa", "Niger", "Ogun", "Ondo", "Osun", "Oyo", "Plateau", "Rivers", "Sokoto",
-  "Taraba", "Yobe", "Zamfara"
-] as const;
+const MAX_TIMES_ATTENDED = 100;
 
 type Theme = "dark" | "light";
+// The form's own copy of an attendee: everything as typed, so the number is
+// text until it is sent.
 type Attendee = {
   fullName: string;
+  gender: string;
   email: string;
   phone: string;
-  gender: string;
-  category: string;
+  dateOfBirth: string;
   institution: string;
-  state: string;
+  course: string;
+  level: string;
+  stateOfOrigin: string;
+  stateOfResidence: string;
+  timesAttended: string;
 };
 type StoredTicket = RegistrationTicket;
 type Errors = Record<string, string>;
 
 const emptyAttendee = (): Attendee => ({
-  fullName: "", email: "", phone: "", gender: "", category: "", institution: "", state: ""
+  fullName: "", gender: "", email: "", phone: "", dateOfBirth: "", institution: "", course: "",
+  level: "", stateOfOrigin: "", stateOfResidence: "", timesAttended: "0"
 });
+
+const today = () => new Date().toISOString().slice(0, 10);
 
 const formatNaira = (value: number) =>
   new Intl.NumberFormat("en-NG", { style: "currency", currency: "NGN", maximumFractionDigits: 0 })
@@ -159,7 +164,7 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
     context.fillText(ticket.fullName, 194, 277);
     context.fillStyle = "#123895";
     context.font = "800 20px Arial";
-    context.fillText(categoryLabel(ticket.category), 194, 312);
+    context.fillText(ticket.level, 194, 312);
 
     context.fillStyle = "#5d6678";
     context.font = "700 19px Arial";
@@ -227,7 +232,7 @@ function Ticket({ ticket }: { ticket: StoredTicket }) {
         </div>
         <div className="ticket-identity">
           <div className="ticket-avatar" aria-hidden="true">{initials}</div>
-          <div><span>Attendee</span><h3>{ticket.fullName}</h3><p>{categoryLabel(ticket.category)}</p></div>
+          <div><span>Attendee</span><h3>{ticket.fullName}</h3><p>{ticket.level}</p></div>
         </div>
         <p className="ticket-theme">Knowledge with purpose</p>
         <div className="ticket-meta">
@@ -306,10 +311,13 @@ export function EventRegistration({ event }: { event: RegistrationEvent | null }
   const validate = () => {
     const next: Errors = {};
     attendees.forEach((attendee, index) => {
-      (["fullName", "email", "phone", "gender", "category", "state"] as const).forEach((field) => {
-        if (!attendee[field].trim()) next[`${index}.${field}`] = "Please complete this field.";
+      (["fullName", "gender", "email", "phone", "level", "stateOfResidence"] as const).forEach((field) => {
+        if (!attendee[field].trim()) next[`${index}.${field}`] = field === "gender" ? "Choose male or female." : "Please complete this field.";
       });
       if (attendee.email && !/^\S+@\S+\.\S+$/.test(attendee.email)) next[`${index}.email`] = "Enter a valid email address.";
+      if (attendee.dateOfBirth && (attendee.dateOfBirth < "1900-01-01" || attendee.dateOfBirth > today())) next[`${index}.dateOfBirth`] = "Enter a date of birth in the past.";
+      const times = Number(attendee.timesAttended || "0");
+      if (!Number.isInteger(times) || times < 0 || times > MAX_TIMES_ATTENDED) next[`${index}.timesAttended`] = "Enter a number from 0 to 100.";
     });
     const shared = findSharedContact(attendees);
     if (shared && !next[`${shared.index}.${shared.field}`]) {
@@ -343,7 +351,9 @@ export function EventRegistration({ event }: { event: RegistrationEvent | null }
       const response = await fetch("/api/registrations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attendees })
+        body: JSON.stringify({
+          attendees: attendees.map((attendee) => ({ ...attendee, timesAttended: Number(attendee.timesAttended || "0") }))
+        })
       });
       const result = await response.json() as { error?: string; tickets?: StoredTicket[] };
       if (!response.ok || !Array.isArray(result.tickets)) {
@@ -453,6 +463,9 @@ export function EventRegistration({ event }: { event: RegistrationEvent | null }
               <div className="attendee-forms">
                 {attendees.map((attendee, index) => <AttendeeForm key={index} attendee={attendee} index={index} errors={errors} update={updateAttendee} />)}
               </div>
+              {/* Shared by every attendee's school and level fields: suggestions, not a fixed list. */}
+              <datalist id="institution-options">{INSTITUTIONS.map((name) => <option value={name} label={INSTITUTION_ABBREVIATIONS[name]} key={name} />)}</datalist>
+              <datalist id="level-options">{LEVELS.map((level) => <option value={level} key={level} />)}</datalist>
               <div className="checkout-card">
                 <div className="checkout-total"><span>Total registration fee</span><strong>{formatNaira(total)}</strong><small>{closedNotice || `${attendees.length} ${attendees.length === 1 ? "attendee" : "attendees"} × ${formatNaira(pricePerAttendee)}`}</small></div>
                 <button className="button button-primary button-submit" type="submit" disabled={Boolean(closedNotice)}>Continue registration <ArrowIcon /></button>
@@ -466,7 +479,7 @@ export function EventRegistration({ event }: { event: RegistrationEvent | null }
 
       <dialog ref={reviewDialog} aria-labelledby="dialog-title" onClose={() => document.body.classList.remove("dialog-open")}>
         {reviewMode === "review" ? (
-          <section><div className="dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div><p className="kicker">Review registration</p><h2 id="dialog-title">Check the details before submitting.</h2><p>You are registering {attendees.length} {attendees.length === 1 ? "attendee" : "attendees"} for {formatNaira(total)}.</p><div className="review-attendees">{attendees.map((attendee, index) => <div className="review-attendee" key={index}><div><strong>{attendee.fullName}</strong><span>{categoryLabel(attendee.category)} · {attendee.email} · {attendee.phone}</span></div><small>Attendee {index + 1}</small></div>)}</div><div className="review-total"><span>Total</span><strong>{formatNaira(total)}</strong></div><p className="dialog-submit-error" role="alert">{submissionError}</p><div className="dialog-actions"><button className="button button-secondary" type="button" onClick={() => closeDialog(reviewDialog)} disabled={isSubmitting}>Edit details</button><button className="button button-primary" type="button" onClick={generateTickets} disabled={isSubmitting}>{isSubmitting ? "Submitting…" : "Submit & generate ticket"}</button></div></section>
+          <section><div className="dialog-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div><p className="kicker">Review registration</p><h2 id="dialog-title">Check the details before submitting.</h2><p>You are registering {attendees.length} {attendees.length === 1 ? "attendee" : "attendees"} for {formatNaira(total)}.</p><div className="review-attendees">{attendees.map((attendee, index) => <div className="review-attendee" key={index}><div><strong>{attendee.fullName}</strong><span>{attendee.level} · {attendee.email} · {attendee.phone}</span></div><small>Attendee {index + 1}</small></div>)}</div><div className="review-total"><span>Total</span><strong>{formatNaira(total)}</strong></div><p className="dialog-submit-error" role="alert">{submissionError}</p><div className="dialog-actions"><button className="button button-secondary" type="button" onClick={() => closeDialog(reviewDialog)} disabled={isSubmitting}>Edit details</button><button className="button button-primary" type="button" onClick={generateTickets} disabled={isSubmitting}>{isSubmitting ? "Submitting…" : "Submit & generate ticket"}</button></div></section>
         ) : (
           <section><div className="dialog-icon ticket-success-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6" /></svg></div><p className="kicker">Registration complete</p><h2 id="dialog-title">Your tickets are ready.</h2><p>Keep each attendee&apos;s ticket available for the event.</p><div className="ticket-list">{tickets.map((ticket) => <Ticket key={ticket.reference} ticket={ticket} />)}</div><div className="dialog-actions"><button className="button button-secondary" type="button" onClick={() => setReviewMode("review")}>Back to review</button><button className="button button-primary" type="button" onClick={() => closeDialog(reviewDialog)}>Done</button></div></section>
         )}
@@ -484,6 +497,12 @@ export function EventRegistration({ event }: { event: RegistrationEvent | null }
   );
 }
 
+function CheckIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6" /></svg>;
+}
+
+const GENDERS = [["male", "Male"], ["female", "Female"]] as const;
+
 function AttendeeForm({ attendee, index, errors, update }: { attendee: Attendee; index: number; errors: Errors; update: (index: number, field: keyof Attendee, value: string) => void }) {
   const suffix = index + 1;
   const error = (field: keyof Attendee) => errors[`${index}.${field}`] ?? "";
@@ -493,17 +512,37 @@ function AttendeeForm({ attendee, index, errors, update }: { attendee: Attendee;
     "aria-invalid": Boolean(error(field)),
     "aria-describedby": `${field}-error-${suffix}`
   });
+  const times = Number(attendee.timesAttended || "0");
+  const setTimes = (value: number) => update(index, "timesAttended", String(Math.min(MAX_TIMES_ATTENDED, Math.max(0, value))));
   return (
     <section className="attendee-form" aria-labelledby={`attendee-title-${suffix}`}>
       <div className="attendee-title"><h3 id={`attendee-title-${suffix}`}>Attendee {suffix}</h3><span>{index === 0 ? "Primary attendee" : "Additional attendee"}</span></div>
       <div className="form-grid">
-        <Field label="Full name" id={`fullName-${suffix}`} error={error("fullName")}><input id={`fullName-${suffix}`} type="text" placeholder="e.g. Aisha Bello" autoComplete="name" {...common("fullName")} /></Field>
-        <Field label="Email address" id={`email-${suffix}`} error={error("email")}><input id={`email-${suffix}`} type="email" placeholder="aisha@example.com" autoComplete="email" {...common("email")} /></Field>
+        <Field label="Full name" id={`fullName-${suffix}`} error={error("fullName")} wide><input id={`fullName-${suffix}`} type="text" placeholder="e.g. Aisha Bello" autoComplete="name" {...common("fullName")} /></Field>
+        <div className="field field-wide">
+          <div className="choice-group" role="radiogroup" aria-label="Gender" aria-invalid={Boolean(error("gender"))} aria-describedby={`gender-error-${suffix}`}>
+            {GENDERS.map(([value, label]) => {
+              const selected = attendee.gender === value;
+              return <button key={value} id={value === "male" ? `gender-${suffix}` : undefined} className={`choice${selected ? " selected" : ""}`} type="button" role="radio" aria-checked={selected} onClick={() => update(index, "gender", value)}>{selected && <CheckIcon />}{label}</button>;
+            })}
+          </div>
+          <p className="error-message" id={`gender-error-${suffix}`} aria-live="polite">{error("gender")}</p>
+        </div>
         <Field label="Phone number" id={`phone-${suffix}`} error={error("phone")}><input id={`phone-${suffix}`} type="tel" placeholder="0800 000 0000" autoComplete="tel" {...common("phone")} /></Field>
-        <Field label="Gender" id={`gender-${suffix}`} error={error("gender")}><select id={`gender-${suffix}`} {...common("gender")}><option value="">Select gender</option><option value="female">Female</option><option value="male">Male</option></select></Field>
-        <Field label="Attendee category" id={`category-${suffix}`} error={error("category")}><select id={`category-${suffix}`} {...common("category")}><option value="">Select category</option><option value="school-leaver">Secondary school leaver</option><option value="undergraduate">Undergraduate</option><option value="postgraduate">Postgraduate student</option><option value="other">Other</option></select></Field>
-        <Field label="School or organisation" id={`institution-${suffix}`} error="" required={false}><input id={`institution-${suffix}`} type="text" placeholder="Optional" autoComplete="organization" {...common("institution")} /></Field>
-        <Field label="State of residence" id={`state-${suffix}`} error={error("state")} wide><select id={`state-${suffix}`} autoComplete="address-level1" {...common("state")}><option value="">Select state</option>{NIGERIAN_STATES.map((state) => <option value={state} key={state}>{state}</option>)}</select></Field>
+        <Field label="Email address" id={`email-${suffix}`} error={error("email")}><input id={`email-${suffix}`} type="email" placeholder="aisha@example.com" autoComplete="email" {...common("email")} /></Field>
+        <Field label="Date of birth" id={`dateOfBirth-${suffix}`} error={error("dateOfBirth")} required={false}><input id={`dateOfBirth-${suffix}`} type="date" min="1900-01-01" max={today()} autoComplete="bday" {...common("dateOfBirth")} /></Field>
+        <Field label="School or institution" id={`institution-${suffix}`} error="" required={false}><input id={`institution-${suffix}`} type="text" list="institution-options" placeholder="Start typing to search" autoComplete="off" {...common("institution")} /></Field>
+        <Field label="Course" id={`course-${suffix}`} error="" required={false}><input id={`course-${suffix}`} type="text" placeholder="e.g. Microbiology" {...common("course")} /></Field>
+        <Field label="Level" id={`level-${suffix}`} error={error("level")}><input id={`level-${suffix}`} type="text" list="level-options" placeholder="Choose or type, e.g. 200 Level" autoComplete="off" {...common("level")} /></Field>
+        <Field label="State of origin" id={`stateOfOrigin-${suffix}`} error="" required={false}><select id={`stateOfOrigin-${suffix}`} {...common("stateOfOrigin")}><option value="">Select state</option>{STATE_NAMES.map((state) => <option value={state} key={state}>{state}</option>)}</select></Field>
+        <Field label="State of residence" id={`stateOfResidence-${suffix}`} error={error("stateOfResidence")}><select id={`stateOfResidence-${suffix}`} autoComplete="address-level1" {...common("stateOfResidence")}><option value="">Select state</option>{STATE_NAMES.map((state) => <option value={state} key={state}>{state}</option>)}</select></Field>
+        <Field label="Times attended before" id={`timesAttended-${suffix}`} error={error("timesAttended")} required={false}>
+          <div className="count-input">
+            <button type="button" onClick={() => setTimes(times - 1)} disabled={times <= 0} aria-label="One time fewer">−</button>
+            <input id={`timesAttended-${suffix}`} type="text" inputMode="numeric" pattern="[0-9]*" value={attendee.timesAttended} onChange={(event) => update(index, "timesAttended", event.target.value.replace(/\D/g, "").slice(0, 3))} onBlur={() => { if (!attendee.timesAttended) update(index, "timesAttended", "0"); }} aria-invalid={Boolean(error("timesAttended"))} aria-describedby={`timesAttended-error-${suffix}`} />
+            <button type="button" onClick={() => setTimes(times + 1)} disabled={times >= MAX_TIMES_ATTENDED} aria-label="One time more">+</button>
+          </div>
+        </Field>
       </div>
     </section>
   );

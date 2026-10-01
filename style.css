@@ -177,6 +177,19 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round
 .field input:focus, .field select:focus { background: var(--white); border-color: var(--navy-700); box-shadow: 0 0 0 3px rgba(18,56,149,.12); }
 .field input[aria-invalid="true"], .field select[aria-invalid="true"] { border-color: var(--error); box-shadow: 0 0 0 3px rgba(180,35,24,.09); }
 .error-message { min-height: 18px; margin: 5px 0 0; color: var(--error); font-size: 11px; font-weight: 700; line-height: 1.4; }
+.choice-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.choice { min-height: 50px; padding: 12px 14px; display: inline-flex; align-items: center; justify-content: center; gap: 8px; color: #343b4e; background: #fbfbfc; border: 1px solid #cfd4df; border-radius: 10px; cursor: pointer; font-weight: 800; transition: background .2s ease, border-color .2s ease, color .2s ease; }
+.choice:hover { border-color: var(--navy-700); }
+.choice:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(18,56,149,.18); }
+.choice svg { width: 16px; height: 16px; stroke-width: 2.6; }
+.choice.selected { color: var(--white); background: var(--navy-700); border-color: var(--navy-700); }
+.choice-group[aria-invalid="true"] .choice:not(.selected) { border-color: var(--error); }
+.count-input { display: grid; grid-template-columns: 50px 1fr 50px; overflow: hidden; background: #fbfbfc; border: 1px solid #cfd4df; border-radius: 10px; }
+.count-input:focus-within { background: var(--white); border-color: var(--navy-700); box-shadow: 0 0 0 3px rgba(18,56,149,.12); }
+.count-input button { height: 48px; padding: 0; color: var(--navy-700); background: transparent; border: 0; cursor: pointer; font-size: 22px; transition: background .2s ease; }
+.count-input button:hover:not(:disabled) { background: rgba(18,56,149,.07); }
+.count-input button:disabled { opacity: .35; cursor: not-allowed; }
+.field .count-input input { min-height: 48px; padding: 0; background: transparent; border: 0; border-radius: 0; box-shadow: none; font-weight: 800; text-align: center; }
 .dialog-submit-error { min-height: 20px; margin: 12px 0 0; color: var(--error); font-size: 13px; font-weight: 750; line-height: 1.45; }
 .checkout-card { position: sticky; bottom: 16px; z-index: 10; margin-top: 24px; padding: 18px 20px; display: flex; align-items: center; justify-content: space-between; gap: 24px; color: var(--white); background: rgba(7,21,79,.97); border: 1px solid rgba(255,255,255,.12); border-radius: var(--radius-md); box-shadow: var(--shadow); backdrop-filter: blur(12px); }
 .checkout-total { display: grid; grid-template-columns: auto auto; align-items: baseline; column-gap: 14px; }

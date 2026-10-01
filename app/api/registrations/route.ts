@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 
 import {
-  categoryLabel,
   parseRegistrationAttendees,
   STATE_CODES,
   type RegistrationTicket
@@ -62,7 +61,6 @@ export async function POST(request: Request) {
     return unavailable();
   }
 
-  // The category has no column of its own in Sajal; it is kept as the level.
   const { data, error } = await supabase.rpc("self_register_group", {
     p_event_id: eventId,
     p_attendees: attendees.map((attendee) => ({
@@ -70,9 +68,13 @@ export async function POST(request: Request) {
       gender: attendee.gender,
       email: attendee.email,
       phone_number: attendee.phone,
+      date_of_birth: attendee.dateOfBirth || null,
       institution: attendee.institution || null,
-      level: categoryLabel(attendee.category),
-      state_of_residence: STATE_CODES[attendee.state]
+      course: attendee.course || null,
+      level: attendee.level,
+      state_of_origin: attendee.stateOfOrigin ? STATE_CODES[attendee.stateOfOrigin] : null,
+      state_of_residence: STATE_CODES[attendee.stateOfResidence],
+      times_attended: attendee.timesAttended
     }))
   });
 
@@ -99,7 +101,7 @@ export async function POST(request: Request) {
     .sort((a, b) => a.attendee_index - b.attendee_index)
     .map((row) => ({
       fullName: row.full_name,
-      category: attendees[row.attendee_index - 1].category,
+      level: attendees[row.attendee_index - 1].level,
       reference: row.registration_code,
       qrPayload: row.qr_payload
     }));
